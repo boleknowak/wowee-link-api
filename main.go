@@ -58,7 +58,7 @@ func main() {
 	r.HandleFunc("/stats/{code}", GetURLStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/get-link/{code}", GetURLHandler(db)).Methods("GET")
 
-	log.Println("Server started on http://localhost:8000")
+	log.Println("[INFO] Server started on http://localhost:8000")
 	log.Fatal(http.ListenAndServe(":8000", r))
 }
 
