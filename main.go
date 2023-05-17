@@ -15,6 +15,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
+type IndexResponse struct {
+	Status string `json:"status"`
+}
+
 type ShortenRequest struct {
 	URL string `json:"url"`
 }
@@ -54,12 +58,32 @@ func main() {
 
 	r := mux.NewRouter()
 
+	r.HandleFunc("/", IndexURLHandler(db)).Methods("GET")
 	r.HandleFunc("/shorten", ShortenURLHandler(db)).Methods("POST")
 	r.HandleFunc("/stats/{code}", GetURLStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/get-link/{code}", GetURLHandler(db)).Methods("GET")
 
 	log.Println("[INFO] Server started on http://localhost:8000")
 	log.Fatal(http.ListenAndServe(":8000", r))
+}
+
+func IndexURLHandler(db *sqlx.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response := IndexResponse{
+			Status: "OK",
+		}
+
+		jsonResponse, err := json.Marshal(response)
+		if err != nil {
+			log.Println("Error marshaling JSON response:", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonResponse)
+	}
 }
 
 func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
