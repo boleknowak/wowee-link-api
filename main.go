@@ -63,8 +63,8 @@ func main() {
 	r.HandleFunc("/stats/{code}", GetURLStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/get-link/{code}", GetURLHandler(db)).Methods("GET")
 
-	log.Println("[INFO] Server started on http://localhost:8000")
-	log.Fatal(http.ListenAndServe(":8000", r))
+	log.Println("[INFO] Server started on http://localhost:3001")
+	log.Fatal(http.ListenAndServe(":3001", r))
 }
 
 func IndexURLHandler(db *sqlx.DB) http.HandlerFunc {
