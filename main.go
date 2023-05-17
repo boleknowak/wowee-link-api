@@ -27,6 +27,15 @@ type GetURLResponse struct {
 	URL string `json:"url"`
 }
 
+type Link struct {
+	ID           int       `db:"id" json:"id"`
+	Code         string    `db:"code" json:"code"`
+	URL          string    `db:"url" json:"url"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	AttemptCount int       `db:"attempt_count" json:"attempt_count"`
+	ClickCount   int       `db:"click_count" json:"click_count"`
+}
+
 const (
 	codeLength = 6
 	charset    = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789"
@@ -47,7 +56,7 @@ func main() {
 
 	r.HandleFunc("/shorten", ShortenURLHandler(db)).Methods("POST")
 	r.HandleFunc("/stats/{code}", GetURLStatsHandler(db)).Methods("GET")
-	r.HandleFunc("/link/{code}", GetURLHandler(db)).Methods("GET")
+	r.HandleFunc("/get-link/{code}", GetURLHandler(db)).Methods("GET")
 
 	log.Println("Server started on http://localhost:3000")
 	log.Fatal(http.ListenAndServe(":3000", r))
@@ -62,12 +71,28 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 			return
 		}
 
-		var existingCode string
-		query := `SELECT code FROM links WHERE = $1`
-		err = db.Get(&existingCode, query, request.URL)
+		var result struct {
+			Code         string
+			AttemptCount int `db:"attempt_count"`
+		}
+
+		query := `SELECT code, attempt_count FROM links WHERE url = $1`
+		err = db.Get(&result, query, request.URL)
+
+		existingCode := result.Code
+		attemptCount := result.AttemptCount
+
 		if err == nil {
 			response := ShortenResponse{
 				ShortURL: existingCode,
+			}
+
+			query = `UPDATE links SET attempt_count = $1 WHERE code = $2`
+			_, err = db.Exec(query, attemptCount+1, existingCode)
+			if err != nil {
+				log.Println("Error updating attempt_count in the database:", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
 			}
 
 			jsonResponse, err := json.Marshal(response)
@@ -89,8 +114,8 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 
 		code := generateCode()
 
-		query = `INSERT INTO links (code, url, created_at) VALUES ($1, $2, $3)`
-		_, err = db.Exec(query, code, request.URL, time.Now())
+		query = `INSERT INTO links (code, url, created_at, attempt_count) VALUES ($1, $2, $3, $4)`
+		_, err = db.Exec(query, code, request.URL, time.Now(), 1)
 		if err != nil {
 			log.Println("Error inserting URL into the database:", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -116,21 +141,16 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 
 func GetURLStatsHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Retrieve the short code from the URL path parameters
-		// Query the database using the provided connection to get the stats for the given short code
-
-		// Return the stats data in the response
-	}
-}
-
-func GetURLHandler(db *sqlx.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		code := vars["code"]
 
-		query := `SELECT url FROM links WHERE code = $1`
-		var url string
-		err := db.Get(&url, query, code)
+		query := `
+			SELECT id, code, url, created_at, attempt_count, click_count
+			FROM links
+			WHERE code = $1
+		`
+		var link Link
+		err := db.Get(&link, query, code)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				http.NotFound(w, r)
@@ -141,8 +161,68 @@ func GetURLHandler(db *sqlx.DB) http.HandlerFunc {
 			return
 		}
 
+		response := Link{
+			ID:           link.ID,
+			Code:         link.Code,
+			URL:          link.URL,
+			CreatedAt:    link.CreatedAt,
+			AttemptCount: link.AttemptCount,
+			ClickCount:   link.ClickCount,
+		}
+
+		jsonResponse, err := json.Marshal(response)
+		if err != nil {
+			log.Println("Error marshaling JSON response:", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonResponse)
+	}
+}
+
+func GetURLHandler(db *sqlx.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		code := vars["code"]
+
+		query := `SELECT id, url FROM links WHERE code = $1`
+		var link Link
+		err := db.Get(&link, query, code)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.NotFound(w, r)
+			} else {
+				log.Println("Error querying database:", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		clickCountQuery := `UPDATE links SET click_count = click_count + 1 WHERE id = $1`
+		_, err = db.Exec(clickCountQuery, link.ID)
+		if err != nil {
+			log.Println("Error updating click count:", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+
+		clicksQuery := `
+    INSERT INTO clicks (link_id, clicks, date)
+    VALUES ($1, 1, $2)
+    ON CONFLICT (link_id, date)
+    DO UPDATE SET clicks = clicks.clicks + 1
+`
+		_, err = db.Exec(clicksQuery, link.ID, time.Now().UTC().Format("2006-01-02"))
+		if err != nil {
+			log.Println("Error inserting/updating click count:", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+
 		response := GetURLResponse{
-			URL: url,
+			URL: link.URL,
 		}
 
 		jsonResponse, err := json.Marshal(response)
