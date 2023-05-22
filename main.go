@@ -89,6 +89,7 @@ func IndexURLHandler(db *sqlx.DB) http.HandlerFunc {
 func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO: measure request time (give user info how long it took to process the request, show on the frontend)
+		// TODO: check if URL is valid and if it's not a short URL
 		var request ShortenRequest
 		err := json.NewDecoder(r.Body).Decode(&request)
 		if err != nil {
