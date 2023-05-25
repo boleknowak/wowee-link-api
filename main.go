@@ -24,11 +24,13 @@ type ShortenRequest struct {
 }
 
 type ShortenResponse struct {
-	ShortURL string `json:"short_url"`
+	ShortURL    string `json:"short_url"`
+	ElapsedTime int64  `json:"elapsed_time"`
 }
 
 type GetURLResponse struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	ElapsedTime int64  `json:"elapsed_time"`
 }
 
 type Link struct {
@@ -38,6 +40,7 @@ type Link struct {
 	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 	AttemptCount int       `db:"attempt_count" json:"attempt_count"`
 	ClickCount   int       `db:"click_count" json:"click_count"`
+	ElapsedTime  int64     `json:"elapsed_time"`
 }
 
 const (
@@ -90,6 +93,7 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO: measure request time (give user info how long it took to process the request, show on the frontend)
 		// TODO: check if URL is valid and if it's not a short URL
+		var startTime = time.Now()
 		var request ShortenRequest
 		err := json.NewDecoder(r.Body).Decode(&request)
 		if err != nil {
@@ -109,16 +113,17 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 		attemptCount := result.AttemptCount
 
 		if err == nil {
-			response := ShortenResponse{
-				ShortURL: existingCode,
-			}
-
 			query = `UPDATE links SET attempt_count = $1 WHERE code = $2`
 			_, err = db.Exec(query, attemptCount+1, existingCode)
 			if err != nil {
 				log.Println("Error updating attempt_count in the database:", err)
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
+			}
+
+			response := ShortenResponse{
+				ShortURL:    existingCode,
+				ElapsedTime: time.Since(startTime).Milliseconds(),
 			}
 
 			jsonResponse, err := json.Marshal(response)
@@ -149,7 +154,8 @@ func ShortenURLHandler(db *sqlx.DB) http.HandlerFunc {
 		}
 
 		response := ShortenResponse{
-			ShortURL: code,
+			ShortURL:    code,
+			ElapsedTime: time.Since(startTime).Milliseconds(),
 		}
 
 		jsonResponse, err := json.Marshal(response)
@@ -169,6 +175,7 @@ func GetURLStatsHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		code := vars["code"]
+		var startTime = time.Now()
 
 		query := `
 			SELECT id, code, url, created_at, attempt_count, click_count
@@ -194,6 +201,7 @@ func GetURLStatsHandler(db *sqlx.DB) http.HandlerFunc {
 			CreatedAt:    link.CreatedAt,
 			AttemptCount: link.AttemptCount,
 			ClickCount:   link.ClickCount,
+			ElapsedTime:  time.Since(startTime).Milliseconds(),
 		}
 
 		jsonResponse, err := json.Marshal(response)
@@ -213,6 +221,7 @@ func GetURLHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		code := vars["code"]
+		var startTime = time.Now()
 
 		query := `SELECT id, url FROM links WHERE code = $1`
 		var link Link
@@ -248,7 +257,8 @@ func GetURLHandler(db *sqlx.DB) http.HandlerFunc {
 		}
 
 		response := GetURLResponse{
-			URL: link.URL,
+			URL:         link.URL,
+			ElapsedTime: time.Since(startTime).Milliseconds(),
 		}
 
 		jsonResponse, err := json.Marshal(response)
